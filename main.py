@@ -1,5 +1,5 @@
 """
-Kulinarcha (@kulinarcha) Telegram kanali uchun Gemini va Gibrid rasm tizimiga ega avtomat post generatori.
+Kulinarcha (@kulinarcha) Telegram kanali uchun Gemini va Pexels gibrid rasm tizimiga ega avtomat post generatori.
 """
 
 import base64
@@ -15,10 +15,10 @@ import requests
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
-UNSPLASH_ACCESS_KEY = os.environ.get("PEXELS_API_KEY", "") # Ixtiyoriy real rasm uchun
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 
-GEMINI_TEXT_MODEL = "gemini-2.0-flash"
-GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+GEMINI_TEXT_MODEL = "gemini-1.5-flash"
+GEMINI_IMAGE_MODEL = "gemini-1.5-flash"
 
 TELEGRAM_CAPTION_LIMIT = 1024
 HISTORY_FILE = "history.txt"
@@ -172,7 +172,7 @@ def matn_yoz(rubrika: str) -> dict:
         "@@@MATN@@@\n"
         "<to'liq tayyor post matni, heshteglar bilan birga>\n"
         "@@@IMAGE_QUERY@@@\n"
-        "<Unsplash yoki internetdan qidirish uchun ingliz tilidagi kalit so'z, masalan: creamy mushroom pasta>\n"
+        "<Pexels orqali qidirish uchun ingliz tilidagi kalit so'z, masalan: creamy mushroom pasta>\n"
         "@@@IMAGE_PROMPT@@@\n"
         "<Gemini orqali rasm generatsiya qilish uchun ingliz tilida o'ta professional fotorealistik prompt>\n"
         "@@@TUGADI@@@"
@@ -202,31 +202,32 @@ def matn_yoz(rubrika: str) -> dict:
 
 
 def find_real_image(query: str) -> bytes:
-    """1-Bosqich: Unsplash API orqali real va sifatli rasm qidirish"""
-    if not UNSPLASH_ACCESS_KEY:
+    """1-Bosqich: Pexels API orqali real va sifatli rasm qidirish"""
+    if not PEXELS_API_KEY:
         return None
     
     encoded_query = requests.utils.quote(query)
-    url = f"https://api.unsplash.com/search/photos?query={encoded_query}&per_page=1&client_id={UNSPLASH_ACCESS_KEY}"
+    url = f"https://api.pexels.com/v1/search?query={encoded_query}&per_page=1"
+    headers = {"Authorization": PEXELS_API_KEY}
     
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, headers=headers, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            results = data.get("results", [])
-            if results:
-                image_url = results[0]["urls"]["regular"]
+            photos = data.get("photos", [])
+            if photos:
+                image_url = photos[0]["src"]["large"]
                 img_resp = requests.get(image_url, timeout=60)
                 if img_resp.status_code == 200:
-                    print(f"[INFO] Unsplash orqali real rasm topildi: {image_url}")
+                    print(f"[INFO] Pexels orqali real rasm topildi: {image_url}")
                     return img_resp.content
     except Exception as e:
-        print(f"[OGOHLANTIRISH] Unsplash orqali rasm qidirishda xatolik: {e}")
+        print(f"[OGOHLANTIRISH] Pexels orqali rasm qidirishda xatolik: {e}")
     return None
 
 
 def rasm_generatsiya_gemini(prompt: str) -> bytes:
-    """2-Bosqich (Zaxira): Gemini API orqali rasm generatsiyasi (Imagen)"""
+    """2-Bosqich (Zaxira): Gemini API orqali rasm generatsiyasi"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_IMAGE_MODEL}:generateContent"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
@@ -252,7 +253,6 @@ def telegramga_yubor(rasm_bytes: bytes, matn: str) -> None:
     media_type = rasm_media_type(rasm_bytes)
     fayl_nomi = "post.png" if media_type == "image/png" else "post.jpg"
 
-    # 1. Rasmni alohida yuborish
     photo_resp = requests.post(
         f"{base_url}/sendPhoto",
         data={"chat_id": TELEGRAM_CHANNEL_ID},
@@ -261,7 +261,6 @@ def telegramga_yubor(rasm_bytes: bytes, matn: str) -> None:
     )
     photo_resp.raise_for_status()
 
-    # 2. Matnni alohida xabar sifatida tagiga yuborish (limit muammosini oldini oladi)
     text_resp = requests.post(
         f"{base_url}/sendMessage",
         data={"chat_id": TELEGRAM_CHANNEL_ID, "text": matn, "parse_mode": "HTML"},
@@ -282,7 +281,6 @@ def main() -> None:
     image_prompt = natija["image_prompt"]
     print(f"[INFO] Post tayyor: \"{post_nomi}\"")
 
-    # Gibrid rasm tanlash tizimi (Smart Fallback)
     print(f"[INFO] Real rasm qidirilmoqda: {image_query}")
     rasm_bytes = find_real_image(image_query)
 
