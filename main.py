@@ -1,5 +1,5 @@
 """
-Kulinarcha (@kulinarcha) Telegram kanali uchun Gemini va Pexels gibrid rasm tizimiga ega avtomat post generatori.
+Kulinarcha (@kulinarcha) Telegram kanali uchun Gemini (dinamik model) va Pexels gibrid rasm tizimiga ega avtomat post generatori.
 """
 
 import base64
@@ -16,9 +16,6 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
-
-GEMINI_TEXT_MODEL = "gemini-1.5-flash"
-GEMINI_IMAGE_MODEL = "gemini-1.5-flash"
 
 TELEGRAM_CAPTION_LIMIT = 1024
 HISTORY_FILE = "history.txt"
@@ -129,8 +126,31 @@ def toshkent_hafta_kuni() -> int:
     return now.weekday()
 
 
+def get_best_gemini_model() -> str:
+    """Google API orqali hozirda mavjud bo'lgan eng so'nggi flash modelini avtomatik topadi"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+    try:
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = data.get("models", [])
+            flash_models = [
+                m["name"].replace("models/", "") for m in models 
+                if "flash" in m["name"].lower() and "generateContent" in m.get("supportedGenerationMethods", [])
+            ]
+            if flash_models:
+                flash_models.sort(reverse=True)
+                selected_model = flash_models[0]
+                print(f"[INFO] Tanlangan faol Gemini modeli: {selected_model}")
+                return selected_model
+    except Exception as e:
+        print(f"[OGOHLANTIRISH] Modelni avtomatik aniqlashda xatolik: {e}, zaxira model ishlatiladi.")
+    return "gemini-2.5-flash"
+
+
 def call_gemini(prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    model_name = get_best_gemini_model()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
@@ -228,7 +248,8 @@ def find_real_image(query: str) -> bytes:
 
 def rasm_generatsiya_gemini(prompt: str) -> bytes:
     """2-Bosqich (Zaxira): Gemini API orqali rasm generatsiyasi"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    model_name = get_best_gemini_model()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     resp = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=120)
